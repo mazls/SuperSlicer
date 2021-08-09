@@ -369,6 +369,7 @@ void PerimeterGenerator::process()
         // simplification already done at slicing
         //ExPolygons last        = union_ex(surface.expolygon.simplify_p(SCALED_RESOLUTION));
         ExPolygons last        = union_ex(surface.expolygon);
+        double last_area = -1;
 
         if (loop_number >= 0) {
 
@@ -581,11 +582,22 @@ void PerimeterGenerator::process()
                             +(float)(min_spacing / 2 - 1),
                             (round_peri ? ClipperLib::JoinType::jtRound : ClipperLib::JoinType::jtMiter),
                             (round_peri ? min_round_spacing : 3));
-
+                        // now try with different min spacing if we fear some hysteresis
+                        //TODO, do that for each polygon from last, instead to do for all of them in one go.
                         ExPolygons no_thin_onion = offset_ex(last, double(-good_spacing));
+                        if (last_area < 0) {
+                            for (const ExPolygon& expoly : last) {
+                                last_area += expoly.area();
+                            }
+                        }
+                        double new_area = 0;
+                        for (const ExPolygon& expoly : next_onion) {
+                            new_area += expoly.area();
+                        }
+
                         std::vector<float> divs { 1.8f, 1.6f }; //don't over-extrude, so don't use divider >2
                         size_t idx_div = 0;
-                        while (next_onion.size() > no_thin_onion.size() && idx_div < divs.size()) {
+                        while ((next_onion.size() > no_thin_onion.size() || (new_area != 0 && last_area > new_area * 100)) && idx_div < divs.size()) {
                             float div = divs[idx_div];
                             //use a sightly bigger spacing to try to drastically improve the split, that can lead to very thick gapfill
                             ExPolygons next_onion_secondTry = offset2_ex(
@@ -593,10 +605,21 @@ void PerimeterGenerator::process()
                                 -(float)(good_spacing + (min_spacing / div) - 1),
                                 +(float)((min_spacing / div) - 1));
                             if (next_onion.size() > next_onion_secondTry.size() * 1.2  && next_onion.size() > next_onion_secondTry.size() + 2) {
+                                // don't get it if it creates too many
                                 next_onion = next_onion_secondTry;
+                            } else if (next_onion.size() > next_onion_secondTry.size() || last_area > new_area * 100) {
+                                // don't get it if it's too small
+                                double area_new = 0;
+                                for (const ExPolygon& expoly : next_onion_secondTry) {
+                                    area_new += expoly.area();
+                                }
+                                if (last_area > area_new * 100 || new_area == 0) {
+                                    next_onion = next_onion_secondTry;
+                                }
                             }
                             idx_div++;
                         }
+                        last_area = new_area;
 
                     } else {
                         // If "overlapping_perimeters" is enabled, this paths will be entered, which 
