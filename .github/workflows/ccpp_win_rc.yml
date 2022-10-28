@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rc
+  workflow_dispatch: # Put here!!
 
 jobs:
   build_dep:
